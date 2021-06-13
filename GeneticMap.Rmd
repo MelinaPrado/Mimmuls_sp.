@@ -1,0 +1,242 @@
+---
+author: "Allison, Ashley, Melina and Pedro"
+date: "6/9/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# "A Genetic Map in the Mimulus guttatus Species Complex Reveals Transmission Ratio Distortion due to Heterospecific Interactions"
+
+O trabalho publicado em 2001 representa um estudo entre o cruzamento interespecífico entre M. guttatus e M. nasutus sobre especiação e adaptação floral. A construção de um mapa de ligação a partir de uma população F2 mostrou que próximo da metade dos marcadores apresentou significante distorção da taxa de transmissão, sugerindo uma divergência substancial entre as duas espécies. O mapa foi construído a partir de 255 marcadores em 14 grupos de ligação, com um comprimento total de 1780 cM Kosambi. Dentre esses 255 marcadores, haviam marcadores AFLP, microssatélites e marcadores baseados em gene.
+
+Mapa resultante deste trabalho:
+
+```{r 00, echo = FALSE}
+K = knitr::include_graphics("screen11.png")
+M = knitr::include_graphics("screen12.png")
+K
+M
+```
+
+Novos locos foram genotipados agora e um novo mapa será construído a seguir:
+
+### Importando os dados:
+
+Chamando a biblioteca 'onemap', lendo o arquivo '.raw' contendo os novos marcadores e verificando o tipo de população em estudo através do 'onemap':
+```{r 0, results = "hide", warning = FALSE, message = FALSE}
+library('onemap')
+```
+
+```{r 1}
+map_maker_data <- read_mapmaker(file = "m_feb06.raw")
+class(map_maker_data)
+```
+
+A população F2 contém 287 indivíduos e 418 marcadores agora.
+
+### Visualização dos dados:
+
+Antes de construir o mapa é aconselhado avaliar visualmente a população, distribuição e o tipo dos marcadores utilizando as seguintes funções:
+
+```{r 2}
+plot(map_maker_data)
+```
+
+```{r 3}
+plot_by_segreg_type(map_maker_data)
+```
+
+Os gráficos nos mostram que o conjunto de dados possui 213 marcadores codominantes (A.H.B), 92 marcadores dominantes para o alelo B (C.A) e 113 marcadores dominantes para o alelo A (D.B).
+
+### Achando marcadores redundantes:
+
+Há grande possibilidade que haja marcadores contendo as mesmas informações genotípicas. Estes marcadores que não agregam novas informações serão agrupados em compartimentos, ou 'bins', por meio da função 'find_bins()'. Pois deixá-los na análise só irá aumentar o esforço computacional durante a montagem do mapa.
+
+```{r 4}
+bins <- find_bins(map_maker_data); bins
+bins_example <- create_data_bins(map_maker_data, bins)
+```
+
+Neste conjunto de dados não há marcas redundantes.
+
+### Teste de segregação:
+
+Essa etapa é necessária para verificar se os marcadores estão segregando de forma mendeliana, para isso o teste chi-quadrado é realizado:
+
+```{r 5}
+f2_test <- test_segregation(bins_example); class(f2_test)
+print(f2_test)[1:10, 1:5]
+```
+
+Onde na coluna 1 são os marcadores. Na coluna 2 são as hipóteses nulas de que cada marcador está segregando de acordo com o tipo do marcador, se dominante ou codominante. Na coluna 3 é o teste de Chi-quadrado. Na coluna 4 o seu p-valor. E na coluna 5 a proporção dos indivíduos genotipados para esse marcador.
+
+### Correção de Bonferroni
+
+No entanto para declarar significância, devemos levar em conta a análise de múltiplos testes e fazer uma correção de Bonferroni:
+```{r 6}
+Bonferroni_alpha(f2_test)
+plot(f2_test)
+```
+
+O gráfico mostra os p-valores transformados usando o Log negativo na base 10 para melhor visualização. Para assegurar confiabilidade nos resultados, optamos por descartar as marcas que estão entre os 15% significantes, mesmo sendo uma correção conservativa.
+
+Selecionamos apenas as marcas que estão entre os 85% não significantes:
+```{r 7, results = "hide"}
+select_segreg(f2_test, distorted = FALSE)
+no_dist <- select_segreg(f2_test, distorted = FALSE, numbers = TRUE); no_dist
+```
+
+E agora o número de marcas restantes são:
+
+```{r 8}
+length(no_dist)
+```
+
+### Estimando a fração de recombinação por dois pontos:
+
+Agora iremos testar primeiro a fração de recombinação por pares e calcular a pontuação LOD:
+
+```{r 9}
+twopts_f2 <- rf_2pts(input.obj = bins_example)
+LOD_sug <- suggest_lod(bins_example) # LOD_sug
+```
+
+O LOD mínimo sugerido é:
+
+```{r 10}
+LOD_sug
+```
+
+### Atribuindo marcadores aos seus grupos de ligação:
+
+Como não há informação dos cromossomos e posição dos marcadores, iremos levar em consideração apenas as informações de recombinação para montagem do mapa. Agora atribuiremos os marcadores aos devidos grupos de ligação:
+
+```{r 11}
+mark_all_f2 <- make_seq(twopts_f2, no_dist)
+```
+
+Usaremos a função 'group()' para separar os marcadores por grupo, utilizando máxima fração de recombinação de 50% e o LOD sugerido:
+
+```{r 12}
+LGs_f2 <- group(mark_all_f2, LOD = LOD_sug, max.rf = 0.5); LGs_f2
+```
+
+### Selecionando a função de mapeamento de Kosambi:
+
+```{r 13}
+set_map_fun(type = "kosambi")
+```
+
+### Separando os grupos de marcadores:
+
+Separando cada marcador em uma sequência referente ao seu grupo de ligação:
+
+```{r 14}
+F2_LGs_list <- list()
+for (i in 1:14) {
+  name <- paste0("LG" ,i , "_f2")
+  F2_LGs_list[[i]] <- assign(name, make_seq(LGs_f2, i))
+}
+```
+
+### Mapeamento multiponto:
+
+Ordenando dentro do grupo 3 por ser o maior, o algoritmo utilizado será 'Recombination Counting and Ordering', a escolha se deu por ser o algoritmo que resultou no melhor mapa para esse grupo e tambḿe por ser o menor. Para motivos de comparação também foram utilizados o algoritmo 'Rapid Chain Delineation (Doerge, 1996)', o algoritmo 'Unidirectional Growth (Tan and Fu, 2006)' e o método que ordena os marcadores por uma abordagem de escalonamento multidimensional 'MDS':
+
+```{r 15, results = "hide"}
+LG3_rec_f2 <- record(LG3_f2); LG3_rec_f2 #Recombination Counting and Ordering
+LG3_rcd_f2 <- rcd(LG3_f2); LG3_rcd_f2 #Rapid Chain Delineation
+LG3_ug_f2 <- ug(LG3_f2); LG3_ug_f2 #Unidirectional Growth
+LG3_mds_f2 <- mds_onemap(input.seq = LG3_f2, hmm = TRUE, mds.seq = TRUE, mapfn = "kosambi"); LG3_mds_f2 #MDS
+```
+
+Aqui estão os gráficos de ligação referentes a cada um dos algoritmos:
+
+```{r 16}
+rf_graph_table(LG3_rcd_f2) #Rapid Chain Delineation
+rf_graph_table(LG3_mds_f2)#MDS
+rf_graph_table(LG3_ug_f2) #Unidirectional Growth
+rf_graph_table(LG3_rec_f2) #Recombination Counting and Ordering
+```
+
+### Usando a função 'record' para todos os grupos:
+
+```{r 17, results='hide'}
+F2_rec_list <- lapply(F2_LGs_list, record)
+```
+
+### Agora ordenando todos os grupos:
+
+```{r 20, results = "hide"}
+LGs_f2_ord_list <- lapply(F2_rec_list, order_seq, n.init = 5, subset.search = "twopt", twopt.alg = "rec", THRES = 3, touchdown = TRUE)
+```
+
+### Todos utilizando a função 'Safe':
+
+Primeiro testaremos o ordenamento 'safe' para fazer o mapa:
+
+```{r 21}
+LGs_f2_final <- lapply(LGs_f2_ord_list,make_seq, "safe")
+```
+
+### Fazendo os gráficos de todos os grupos agora ordenados:
+
+```{r 22}
+#Montando os heatmaps
+lapply(LGs_f2_final, rf_graph_table)
+```
+
+### Não entendo essa parte:
+
+```{r 23, results='hide'}
+# Inserir os marcadores não ligados nos grupos pequenos
+lapply(LGs_f2_final, ripple_seq, ws = 2, LOD = 3)
+```
+
+### Finalmente, utilizaremos a função 'draw_map' para desenhar o mapa e a função 'draw_map2' para uma figura melhor esteticamente:
+
+```{r 24, results = "hide", warning = FALSE, message = FALSE}
+draw_map(LGs_f2_final, names = TRUE, grid = TRUE, cex.mrk = 0.7)
+```
+
+```{r 25, results='hide'}
+draw_map2(LGs_f2_final, col.group = "#58A4B0", col.mark = "#335C81", output = "map_LGSafe.png")
+```
+
+
+### Agora utilizando em todos os grupo o ordenamento 'force':
+
+```{r 26}
+LGs_f2_final <- lapply(LGs_f2_ord_list,make_seq, "force")
+```
+
+### Fazendo os gráficos de todos os grupos agora ordenados:
+
+```{r 27}
+lapply(LGs_f2_final, rf_graph_table)
+```
+
+### Não entendo essa parte, nem o erro que acontece:
+
+```{r 28, results='hide'}
+lapply(LGs_f2_final, ripple_seq, ws = 2, LOD = 3)
+```
+
+### Finalmente, utilizaremos a função 'draw_map' para desenhar o mapa:
+
+```{r 29, results='hide'}
+draw_map(LGs_f2_final, names = TRUE, grid = TRUE, cex.mrk = 0.7)
+```
+
+```{r 30, results='hide'}
+draw_map2(LGs_f2_final, col.group = "#58A4B0", col.mark = "#335C81", output = "map_LGForce.png")
+```
+
+```{r}
+knitr::include_graphics("map_LGForce.png")
+knitr::include_graphics("map_LGSafe.png")
+```
+
